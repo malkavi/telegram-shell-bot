@@ -6,11 +6,12 @@ from functools import wraps
 import delegator
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import (
+    Application,
     CallbackQueryHandler,
     CommandHandler,
-    Filters,
+    ContextTypes,
     MessageHandler,
-    Updater,
+    filters,
 )
 
 import settings
@@ -40,18 +41,18 @@ def validate_settings():
 
 def restricted(func):
     @wraps(func)
-    def wrapped(update, context, *args, **kwargs):
+    async def wrapped(update, context, *args, **kwargs):
         user_id = update.effective_user.id
         if not (user_id in settings.ENABLED_USERS or -999999 in settings.ENABLED_USERS):
             print(f"Unauthorized access denied for {user_id}.")
             return
-        return func(update, context, *args, **kwargs)
+        return await func(update, context, *args, **kwargs)
 
     return wrapped
 
 
 @restricted
-def start(update, context):
+async def start(update, context):
     def to_buttons(cmd_row):
         return [InlineKeyboardButton(e[0], callback_data=e[1]) for e in cmd_row]
 
@@ -67,10 +68,10 @@ def start(update, context):
         "/sudo_login to call sudo\r\n"
         "/kill to kill a running task\r\n"
     )
-    update.message.reply_text(msg, reply_markup=reply_markup)
+    await update.message.reply_text(msg, reply_markup=reply_markup)
 
 
-def error(update, context):
+async def error(update, context):
     """Log Errors caused by Updates."""
     logger.warning('Update "%s" caused error "%s"', update, context.error)
 
@@ -82,14 +83,14 @@ def __is_out_all(cmd: str) -> tuple[str, bool]:
     return cmd, False
 
 
-def __do_exec(cmd, update, context, is_script=False, need_filter_cmd=True):
-    def reply_text(msg: str, *args, **kwargs):
+async def __do_exec(cmd, update, context, is_script=False, need_filter_cmd=True):
+    async def reply_text(msg: str, *args, **kwargs):
         if not msg.strip():  # ignore empty message
             return
-        # python len() is by char, MAX_MESSAGE_LENGTH is bytes
-        max_length = constants.MAX_MESSAGE_LENGTH // 2
+        # python len() is by char, MessageLimit.MAX_TEXT_LENGTH is bytes
+        max_length = constants.MessageLimit.MAX_TEXT_LENGTH // 2
         while msg:
-            message.reply_text(msg[:max_length], *args, **kwargs)
+            await message.reply_text(msg[:max_length], *args, **kwargs)
             msg = msg[max_length:]
 
     message = update.message or update.callback_query.message
@@ -101,7 +102,7 @@ def __do_exec(cmd, update, context, is_script=False, need_filter_cmd=True):
         max_idx = 999999
 
     if need_filter_cmd and not __check_cmd_chars(cmd):
-        reply_text("This cmd is illegal.")
+        await reply_text("This cmd is illegal.")
         return
 
     if is_script:
@@ -110,7 +111,7 @@ def __do_exec(cmd, update, context, is_script=False, need_filter_cmd=True):
     try:
         c = delegator.run(cmd, block=False, timeout=1e6)
     except FileNotFoundError as e:
-        reply_text(f"{e}")
+        await reply_text(f"{e}")
         return
     out = ""
     task = (f"{c.pid}", cmd, c)
@@ -122,12 +123,12 @@ def __do_exec(cmd, update, context, is_script=False, need_filter_cmd=True):
         out += line
         cost_time = time.time() - start_time
         if cost_time > 1:
-            reply_text(out[: settings.MAX_TASK_OUTPUT])
+            await reply_text(out[: settings.MAX_TASK_OUTPUT])
             idx += 1
             out = ""
             start_time = time.time()
         if idx > max_idx:
-            reply_text(
+            await reply_text(
                 f"Command not finished. You can kill it by sending /kill {c.pid}"
             )
             break
@@ -135,20 +136,20 @@ def __do_exec(cmd, update, context, is_script=False, need_filter_cmd=True):
 
     __tasks.remove(task)
     if out:
-        reply_text(out[: settings.MAX_TASK_OUTPUT])
+        await reply_text(out[: settings.MAX_TASK_OUTPUT])
     if idx > 3:
-        reply_text(f"Task finished: {cmd}")
+        await reply_text(f"Task finished: {cmd}")
 
 
-def __do_cd(update, context):
+async def __do_cd(update, context):
     cmd: str = update.message.text
     if not cmd.startswith("cd "):
         return False
     try:
         os.chdir(cmd[3:])
-        update.message.reply_text(f"pwd: {os.getcwd()}")
+        await update.message.reply_text(f"pwd: {os.getcwd()}")
     except FileNotFoundError as e:
-        update.message.reply_text(f"{e}")
+        await update.message.reply_text(f"{e}")
     return True
 
 
@@ -169,31 +170,31 @@ def __check_cmd_chars(cmd: str):
 
 
 @restricted
-def do_exec(update, context):
+async def do_exec(update, context):
     if not update.message:
         return
-    if __do_cd(update, context):
+    if await __do_cd(update, context):
         return
     cmd: str = update.message.text
     if not __check_cmd(cmd):
         return
-    __do_exec(cmd, update, context)
+    await __do_exec(cmd, update, context)
 
 
 @restricted
-def do_tasks(update, context):
+async def do_tasks(update, context):
     msg = "\r\n".join([", ".join(e[:2]) for e in __tasks])
     if not msg:
         msg = "Task list is empty"
-    update.message.reply_text(msg)
+    await update.message.reply_text(msg)
 
 
 @restricted
-def do_script(update, context):
+async def do_script(update, context):
     args = context.args.copy()
     if args:
         cmd = " ".join(args)
-        __do_exec(cmd, update, context, is_script=True)
+        await __do_exec(cmd, update, context, is_script=True)
         return
     scripts = "\r\n".join(
         os.path.join(r[len(settings.SCRIPTS_ROOT_PATH) :], file)
@@ -202,100 +203,97 @@ def do_script(update, context):
     )
     msg = "Usage: /script script_name args\r\n"
     msg += scripts
-    update.message.reply_text(msg)
+    await update.message.reply_text(msg)
 
 
 @restricted
-def do_kill(update, context):
+async def do_kill(update, context):
     if not context.args:
-        update.message.reply_text("Usage: /kill pid")
+        await update.message.reply_text("Usage: /kill pid")
         return
 
     pid = context.args[0]
     for task in __tasks:
         if task[0] == pid:
             task[2].kill()
-            update.message.reply_text(f"killed: {task[1]}")
+            await update.message.reply_text(f"killed: {task[1]}")
             return
-    update.message.reply_text(f'pid "{pid}" not find')
+    await update.message.reply_text(f'pid "{pid}" not find')
 
 
 @restricted
-def do_sudo_login(update, context):
+async def do_sudo_login(update, context):
     if not context.args:
-        update.message.reply_text("Usage: /sudo_login password")
+        await update.message.reply_text("Usage: /sudo_login password")
         return
 
     password = context.args[0]
     c = delegator.chain(f'echo "{password}" | sudo -S xxxvvv')
     out = c.out
     if "xxxvvv: command not found" in out:
-        update.message.reply_text("sudo succeeded.")
-    update.message.reply_text("sudo failed.")
+        await update.message.reply_text("sudo succeeded.")
+    await update.message.reply_text("sudo failed.")
 
 
 @restricted
-def shortcut_cb(update, context):
+async def shortcut_cb(update, context):
     query = update.callback_query
+    await query.answer()
     cmd = query.data
     if cmd not in settings.SC_MENU_ITEM_CMDS.keys():
-        update.callback_query.message.reply_text("This cmd is illegal.")
+        await update.callback_query.message.reply_text("This cmd is illegal.")
     cmd_info = settings.SC_MENU_ITEM_CMDS[cmd]
     is_script = cmd_info[2] if len(cmd_info) >= 3 else False
-    __do_exec(cmd, update, context, is_script=is_script, need_filter_cmd=False)
-
+    await __do_exec(cmd, update, context, is_script=is_script, need_filter_cmd=False)
 
 @restricted
-def download(update, context):
+async def download(update, context):
     args = context.args.copy()
     if not args:
-        update.message.reply_text("Filename must not be empty")
+        await update.message.reply_text("Filename must not be empty")
         return
     filename = args[0]
     try:
         with open(filename, "rb") as document:
-            update.message.reply_document(document)
+            await update.message.reply_document(document)
     except (FileNotFoundError, IsADirectoryError):
-        update.message.reply_text(f"Can't find `{filename}`.")
-
+        await update.message.reply_text(f"Can't find `{filename}`.")
 
 @restricted
-def upload(update, context):
+async def upload(update, context):
     bot = context.bot
     file_id = update.message.document.file_id
     file_name = update.message.document.file_name
     logger.info(f"upload file: {file_id} {file_name}")
-    bot.get_file(file_id).download(os.path.join(settings.UPLOAD_PATH, file_name))
-    update.message.reply_text(f"uploaded `{file_name}` to server.")
+    new_file = await bot.get_file(file_id)
+    await new_file.download_to_drive(os.path.join(settings.UPLOAD_PATH, file_name))
+    await update.message.reply_text(f"uploaded `{file_name}` to server.")
 
 
 def main():
-    updater = Updater(
-        settings.TOKEN, use_context=True, request_kwargs=settings.REQUEST_KWARGS
-    )
+    application = Application.builder().token(settings.TOKEN).build()
+    if hasattr(settings, 'REQUEST_KWARGS') and settings.REQUEST_KWARGS:
+        application = Application.builder().token(settings.TOKEN).build()
 
-    dp = updater.dispatcher
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", start))
+    application.add_handler(CallbackQueryHandler(shortcut_cb))
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", start))
-    dp.add_handler(CallbackQueryHandler(shortcut_cb, run_async=True))
+    application.add_handler(CommandHandler("download", download))
+    application.add_handler(MessageHandler(filters.Document.ALL, upload))
 
-    dp.add_handler(CommandHandler("download", download, pass_args=True, run_async=True))
-    updater.dispatcher.add_handler(MessageHandler(Filters.document, upload))
-
-    dp.add_handler(CommandHandler("tasks", do_tasks))
-    dp.add_handler(CommandHandler("kill", do_kill, pass_args=True))
+    application.add_handler(CommandHandler("tasks", do_tasks))
+    application.add_handler(CommandHandler("kill", do_kill))
 
     if not settings.ONLY_SHORTCUT_CMD:
-        dp.add_handler(CommandHandler("sudo_login", do_sudo_login, pass_args=True))
-        dp.add_handler(
-            CommandHandler("script", do_script, pass_args=True, run_async=True)
-        )
-        dp.add_handler(MessageHandler(Filters.text, do_exec, run_async=True))
+        application.add_handler(CommandHandler("sudo_login", do_sudo_login))
+        application.add_handler(CommandHandler("script", do_script))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, do_exec))
 
-    dp.add_error_handler(error)
+    application.add_error_handler(error)
+
     if settings.IS_HEROKU:
-        updater.start_webhook(
+        application.run_webhook(
             listen="0.0.0.0",
             port=settings.PORT,
             url_path=settings.TOKEN,
@@ -304,9 +302,8 @@ def main():
             ),
         )
     else:
-        updater.start_polling()
-    logger.info("Telegram shell bot started.")
-    updater.idle()
+        logger.info("Telegram shell bot started.")
+        application.run_polling()
 
 
 if __name__ == "__main__":

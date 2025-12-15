@@ -5,7 +5,7 @@ description = "A telegram bot to run shell commands"
 authors = ["vicalloy <zbirder@gmail.com>"]
 license = "BSD"
 readme = "README.md"
-packages = [{include = "telegram_shell_bot"}]
+package-mode = false
 
 [tool.black]
 line-length = 88
@@ -32,7 +32,7 @@ skip_gitignore = true
 
 [tool.poetry.dependencies]
 python = "^3.8"
-python-telegram-bot = "^13.14"
+python-telegram-bot = "^21.0"
 "delegator.py" = "^0.1.1"
 
 [tool.poetry.group.dev.dependencies]

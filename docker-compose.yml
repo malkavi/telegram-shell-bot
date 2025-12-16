@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  telegram-shell-bot:
+    image: telegram-shell-bot
+    build: .
+    container_name: telegram-shell-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_API_TOKEN=xxxxxxx:xxxxxxxxxxxxxxxxxxxxxxxxx
+      - ENABLED_USERS=xxxxxxxxx
+      - MAX_TASK_OUTPUT=99999
+      - PORT=8443
+    volumes:
+      # Mount upload directory to persist files
+      - ./upload:/app/upload
+      # Mount scripts directory
+      - ./scripts:/app/scripts
+      # Optional: Mount settings.py if you prefer file-based config
+      # - ./settings.py:/app/settings.py
+    # If you need to run shell commands on the host, you'll need to mount docker socket
+    # WARNING: This is a security risk. Only use if you trust all enabled users.
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock

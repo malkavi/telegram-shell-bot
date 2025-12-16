@@ -1,0 +1,50 @@
+import os
+from os import getenv
+
+TOKEN_STR = getenv("TELEGRAM_API_TOKEN", '')
+TOKEN = TOKEN_STR.strip().strip("'\"") if TOKEN_STR else ''
+
+PORT = int(getenv("PORT", "8443"))
+HEROKU_APP_NAME = getenv("HEROKU_APP_NAME", "telegram-shell-bot")
+IS_HEROKU = getenv("IS_HEROKU", False)
+
+# Set users to -999999 to disable user authentication
+ENABLED_USERS_STR = getenv("ENABLED_USERS", '')
+if ENABLED_USERS_STR:
+    ENABLED_USERS = set(int(e.strip()) for e in ENABLED_USERS_STR.split(',') if e.strip())
+else:
+    ENABLED_USERS = set()
+
+CMD_WHITE_LIST = set()
+CMD_BLACK_LIST = {'rm'}
+CMD_BLACK_CHARS = {';', '\n', "&"}
+ONLY_SHORTCUT_CMD = False
+
+MAX_TASK_OUTPUT = int(getenv("MAX_TASK_OUTPUT", 99999))
+
+PROXY_URL = getenv("ALL_PROXY", '')
+
+SC_MENU_ITEM_ROWS = (
+    (
+        ('pwd', 'pwd'),  # display name, command, is script
+        ('ls', 'ls'),
+        ('ls -lh', 'ls -lh'),
+    ),
+    (
+        ('ls -lha', 'ls -lha'),
+        ('Demo Script', 'demo.py', True),
+    ),
+)
+
+SC_MENU_ITEM_CMDS = {}
+for row in SC_MENU_ITEM_ROWS:
+    for cmd in row:
+        SC_MENU_ITEM_CMDS[cmd[1]] = cmd
+
+REQUEST_KWARGS = {
+    'proxy_url': PROXY_URL
+}
+
+ROOT_PATH = os.path.dirname(os.path.realpath(__file__))
+SCRIPTS_ROOT_PATH = os.path.join(ROOT_PATH, 'scripts')
+UPLOAD_PATH = os.path.join(ROOT_PATH, 'upload')
